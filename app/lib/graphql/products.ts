@@ -72,6 +72,10 @@ export const CATALOG_PRODUCTS_GRID_QUERY = `#graphql
                 name
                 value
               }
+              image {
+                url
+                altText
+              }
             }
           }
           options {

@@ -18,6 +18,7 @@ import { useState } from "react";
 
 import { requireAuth } from "../lib/auth.server";
 import prisma from "../db.server";
+import { invalidatePattern } from "../lib/cache.server";
 
 // Query all company locations
 const COMPANY_LOCATIONS_QUERY = `#graphql
@@ -101,6 +102,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
       await prisma.staffAssignment.create({
         data: { shop, staffId, companyLocationId },
       });
+      invalidatePattern(`staff:${staffId}:locations`);
       return json({ success: true });
     } catch (err: any) {
       if (err.code === "P2002") {
@@ -112,7 +114,11 @@ export const action = async ({ request }: ActionFunctionArgs) => {
 
   if (intent === "remove") {
     const assignmentId = formData.get("assignmentId") as string;
+    const assignment = await prisma.staffAssignment.findUnique({ where: { id: assignmentId } });
     await prisma.staffAssignment.delete({ where: { id: assignmentId } });
+    if (assignment) {
+      invalidatePattern(`staff:${assignment.staffId}:locations`);
+    }
     return json({ success: true });
   }
 

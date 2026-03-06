@@ -95,9 +95,22 @@ export function VariantSelector({
     selectedVariant?.inventoryQuantity !== undefined &&
     selectedVariant.inventoryQuantity <= 0;
 
+  const variantImageUrl =
+    selectedVariant?.image?.url ?? product.featuredImage?.url;
+  const variantImageAlt =
+    selectedVariant?.image?.altText ?? selectedVariant?.title ?? product.title;
+
   return (
     <div className="rep-portal-variant-selector">
       <BlockStack gap="300">
+        {variantImageUrl && (
+          <img
+            className="rep-portal-variant-image"
+            src={variantImageUrl}
+            alt={variantImageAlt}
+            loading="lazy"
+          />
+        )}
         {hasMultipleVariants && (
           <Select
             label="Variant"

@@ -110,6 +110,14 @@
   background-color: var(--portal-background);
 }
 
+.rep-portal-variant-image {
+  width: 100%;
+  max-height: 200px;
+  object-fit: contain;
+  border-radius: 6px;
+  background-color: #f6f6f7;
+}
+
 .rep-portal-cart-item {
   display: flex;
   gap: 12px;
