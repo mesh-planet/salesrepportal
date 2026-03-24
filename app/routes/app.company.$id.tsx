@@ -346,10 +346,12 @@ export default function CompanyCatalog() {
             </BlockStack>
           </Layout.Section>
           <Layout.Section variant="oneThird">
-            <CartSummary
-              currencyCode={currencyCode}
-              onReviewOrder={handleReviewOrder}
-            />
+            <div className="rep-portal-cart-sticky">
+              <CartSummary
+                currencyCode={currencyCode}
+                onReviewOrder={handleReviewOrder}
+              />
+            </div>
           </Layout.Section>
         </Layout>
       </Page>
