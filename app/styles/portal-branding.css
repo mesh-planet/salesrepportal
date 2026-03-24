@@ -86,9 +86,46 @@
   background-color: var(--portal-background);
 }
 
-.rep-portal-cart-sticky {
-  position: sticky;
-  top: 16px;
+.rep-portal-floating-cart {
+  position: fixed;
+  bottom: 20px;
+  right: 20px;
+  z-index: 999;
+  background: #000;
+  color: #fff;
+  border: none;
+  border-radius: 50px;
+  padding: 12px 20px;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.25);
+  transition: transform 0.15s ease, box-shadow 0.15s ease;
+  font-size: 14px;
+  font-weight: 600;
+}
+
+.rep-portal-floating-cart:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 6px 20px rgba(0, 0, 0, 0.3);
+}
+
+.rep-portal-floating-cart__badge {
+  background: #fff;
+  color: #000;
+  border-radius: 50%;
+  min-width: 24px;
+  height: 24px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.rep-portal-floating-cart__text {
+  white-space: nowrap;
 }
 
 .rep-portal-product-grid {

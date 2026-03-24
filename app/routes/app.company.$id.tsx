@@ -33,6 +33,7 @@ import { priceMapToObject } from "../lib/utils/price-resolver";
 import { AppBranding } from "../components/AppBranding";
 import { ProductGrid } from "../components/ProductGrid";
 import { CartSummary } from "../components/CartSummary";
+import { FloatingCartButton } from "../components/FloatingCartButton";
 import { useCartContext } from "../components/CartProvider";
 import prisma from "../db.server";
 import type { Product, PageInfo } from "../types";
@@ -346,15 +347,17 @@ export default function CompanyCatalog() {
             </BlockStack>
           </Layout.Section>
           <Layout.Section variant="oneThird">
-            <div className="rep-portal-cart-sticky">
-              <CartSummary
-                currencyCode={currencyCode}
-                onReviewOrder={handleReviewOrder}
-              />
-            </div>
+            <CartSummary
+              currencyCode={currencyCode}
+              onReviewOrder={handleReviewOrder}
+            />
           </Layout.Section>
         </Layout>
       </Page>
+      <FloatingCartButton
+        currencyCode={currencyCode}
+        onReviewOrder={handleReviewOrder}
+      />
     </>
   );
 }
