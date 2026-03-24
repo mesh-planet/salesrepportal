@@ -18,6 +18,12 @@ COPY . .
 # Use the production Prisma schema (PostgreSQL)
 RUN cp prisma/schema.prod.prisma prisma/schema.prisma
 
+# Clear SQLite migrations and create fresh PostgreSQL baseline
+RUN rm -rf prisma/migrations
+RUN mkdir -p prisma/migrations/0_init
+RUN npx prisma migrate diff --from-empty --to-schema-datamodel prisma/schema.prisma --script > prisma/migrations/0_init/migration.sql
+RUN echo 'provider = "postgresql"' > prisma/migrations/migration_lock.toml
+
 RUN npx prisma generate
 RUN npm run build
 
