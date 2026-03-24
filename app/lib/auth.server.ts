@@ -77,11 +77,18 @@ export async function requireAuth(request: Request): Promise<AuthResult> {
     staffId = `gid://shopify/StaffMember/0`;
   }
 
-  // Check if user is admin: account owner OR flagged in our DB
+  // Check if user has full Shopify permissions by comparing their granted
+  // scopes against the app's requested scopes. Staff with full admin access
+  // get all requested scopes; restricted staff get a subset.
+  const appScopes = (process.env.SCOPES ?? "").split(",").map(s => s.trim()).filter(Boolean);
+  const userScopes = (session.scope ?? "").split(",").map(s => s.trim()).filter(Boolean);
+  const hasFullPermissions = appScopes.length > 0 && appScopes.every(s => userScopes.includes(s));
+
+  // Check if user is admin: account owner, full permissions, OR flagged in our DB
   const dbAdmin = await prisma.staffAssignment.findFirst({
     where: { staffId, companyLocationId: "__ADMIN__" },
   });
-  const isAdmin = isAccountOwner || !!dbAdmin;
+  const isAdmin = isAccountOwner || hasFullPermissions || !!dbAdmin;
 
   const staffMember: StaffMember = {
     id: staffId,
