@@ -1,5 +1,6 @@
 import { authenticate, unauthenticated } from "../shopify.server";
 import { isProductPublished } from "./graphql/products";
+import { sendNewRepSlackNotification } from "./slack.server";
 import prisma from "../db.server";
 import type { StaffMember } from "../types";
 
@@ -106,6 +107,10 @@ export async function requireAuth(request: Request): Promise<AuthResult> {
 
   // Track staff info for the assignments UI (only write when we have useful data)
   if (staffId !== "gid://shopify/StaffMember/0") {
+    const existingStaff = await prisma.staffInfo.findUnique({
+      where: { id: staffId },
+    });
+
     const updateData: Record<string, unknown> = { lastSeen: new Date() };
     if (firstName) updateData.firstName = firstName;
     if (lastName) updateData.lastName = lastName;
@@ -116,6 +121,17 @@ export async function requireAuth(request: Request): Promise<AuthResult> {
       update: updateData,
       create: { id: staffId, shop: session.shop, firstName, lastName, email },
     }).catch((err) => console.error("[Auth] Failed to upsert staff info:", err));
+
+    // Notify Slack when a new (non-admin) rep logs in for the first time
+    if (!existingStaff && !isAdmin) {
+      const repName = [firstName, lastName].filter(Boolean).join(" ") || "Unknown";
+      sendNewRepSlackNotification(session.shop, {
+        repName,
+        repEmail: email || "No email",
+        staffId,
+        shopDomain: session.shop,
+      }).catch((err) => console.error("[Auth] Slack new rep notification failed:", err));
+    }
   }
 
   // Use the OFFLINE admin client for API calls (full app permissions)

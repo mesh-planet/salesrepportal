@@ -75,3 +75,66 @@ export async function sendSlackNotification(
     body: JSON.stringify(payload),
   }).catch((err) => console.error("[Slack] Webhook failed:", err));
 }
+
+interface SlackNewRepNotification {
+  repName: string;
+  repEmail: string;
+  staffId: string;
+  shopDomain: string;
+}
+
+export async function sendNewRepSlackNotification(
+  shop: string,
+  notification: SlackNewRepNotification,
+): Promise<void> {
+  const setting = await prisma.appSettings.findUnique({
+    where: { shop_key: { shop, key: "slackWebhookUrl" } },
+  });
+
+  if (!setting?.value) return;
+
+  const assignmentsUrl = `https://${notification.shopDomain}/admin/apps/sales-rep-portal/app/assignments`;
+
+  const payload = {
+    blocks: [
+      {
+        type: "header",
+        text: {
+          type: "plain_text",
+          text: "New Sales Rep Logged In",
+        },
+      },
+      {
+        type: "section",
+        fields: [
+          { type: "mrkdwn", text: `*Name:*\n${notification.repName}` },
+          { type: "mrkdwn", text: `*Email:*\n${notification.repEmail}` },
+        ],
+      },
+      {
+        type: "section",
+        text: {
+          type: "mrkdwn",
+          text: "This rep doesn't have any company assignments yet. Assign them to companies so they can start placing orders.",
+        },
+      },
+      {
+        type: "actions",
+        elements: [
+          {
+            type: "button",
+            text: { type: "plain_text", text: "Assign Companies" },
+            url: assignmentsUrl,
+          },
+        ],
+      },
+    ],
+    text: `New sales rep ${notification.repName} (${notification.repEmail}) logged in for the first time. Assign them to companies in the portal.`,
+  };
+
+  fetch(setting.value, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
+  }).catch((err) => console.error("[Slack] New rep webhook failed:", err));
+}
