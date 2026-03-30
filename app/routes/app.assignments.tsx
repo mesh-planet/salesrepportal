@@ -61,12 +61,25 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
     throw new Response("Only admins can manage staff assignments", { status: 403 });
   }
 
-  // Fetch all company locations
-  const locationsResponse = await admin.graphql(COMPANY_LOCATIONS_QUERY, {
-    variables: { first: 100 },
-  });
-  const locationsJson = await locationsResponse.json();
-  const locations: LocationInfo[] = locationsJson.data?.companyLocations?.nodes ?? [];
+  // Fetch all company locations (paginated)
+  const locations: LocationInfo[] = [];
+  let cursor: string | null = null;
+  let hasNextPage = true;
+
+  while (hasNextPage) {
+    const locationsResponse = await admin.graphql(COMPANY_LOCATIONS_QUERY, {
+      variables: { first: 100, after: cursor },
+    });
+    const locationsJson = await locationsResponse.json();
+
+    if (!locationsJson.data?.companyLocations) {
+      break;
+    }
+
+    locations.push(...locationsJson.data.companyLocations.nodes);
+    hasNextPage = locationsJson.data.companyLocations.pageInfo.hasNextPage;
+    cursor = locationsJson.data.companyLocations.pageInfo.endCursor;
+  }
 
   // Load known staff members from our DB (populated when they log in)
   const staffMembers: StaffMemberInfo[] = await prisma.staffInfo.findMany({
