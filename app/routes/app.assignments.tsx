@@ -104,7 +104,14 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
     orderBy: { createdAt: "desc" },
   });
 
-  return json({ locations, staffMembers, assignments });
+  // Fetch admin flags (staffIds that have __ADMIN__ assignment)
+  const adminAssignments = await prisma.staffAssignment.findMany({
+    where: { companyLocationId: "__ADMIN__" },
+    select: { staffId: true },
+  });
+  const adminStaffIds = adminAssignments.map((a) => a.staffId);
+
+  return json({ locations, staffMembers, assignments, adminStaffIds });
 };
 
 export const action = async ({ request }: ActionFunctionArgs) => {
@@ -138,6 +145,38 @@ export const action = async ({ request }: ActionFunctionArgs) => {
     }
   }
 
+  if (intent === "toggle-admin") {
+    const staffId = formData.get("staffId") as string;
+    const isCurrentlyAdmin = formData.get("currentValue") === "true";
+
+    if (!staffId) {
+      return json({ error: "Staff ID is required" }, { status: 400 });
+    }
+
+    if (isCurrentlyAdmin) {
+      // Remove admin flag
+      await prisma.staffAssignment.deleteMany({
+        where: { staffId, companyLocationId: "__ADMIN__" },
+      });
+    } else {
+      // Add admin flag
+      try {
+        await prisma.staffAssignment.create({
+          data: { shop, staffId, companyLocationId: "__ADMIN__" },
+        });
+      } catch (err: unknown) {
+        const prismaErr = err as { code?: string };
+        if (prismaErr.code === "P2002") {
+          return json({ error: "Already an admin" }, { status: 400 });
+        }
+        throw err;
+      }
+    }
+
+    invalidatePattern(`staff:${staffId}:locations`);
+    return json({ success: true });
+  }
+
   if (intent === "toggle-invoice-permission") {
     const staffId = formData.get("staffId") as string;
     const currentValue = formData.get("currentValue") === "true";
@@ -164,7 +203,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
 };
 
 export default function Assignments() {
-  const { locations, staffMembers, assignments } = useLoaderData<typeof loader>();
+  const { locations, staffMembers, assignments, adminStaffIds } = useLoaderData<typeof loader>();
   const fetcher = useFetcher();
 
   const [selectedStaff, setSelectedStaff] = useState("");
@@ -294,60 +333,78 @@ export default function Assignments() {
               <Card>
                 <BlockStack gap="300">
                   <Text as="h2" variant="headingMd">
-                    Invoice Permissions
+                    Staff Permissions
                   </Text>
                   <Text as="p" variant="bodyMd" tone="subdued">
-                    Control which reps can send invoices directly. Reps without
-                    permission can only create draft orders for admin review.
+                    Control admin access and invoice permissions for each staff member.
                   </Text>
                   <IndexTable
                     itemCount={staffMembers.length}
                     headings={[
                       { title: "Staff Member" },
                       { title: "Email" },
+                      { title: "Admin" },
                       { title: "Invoice Permission" },
                     ]}
                     selectable={false}
                   >
-                    {staffMembers.map((s, index) => (
-                      <IndexTable.Row key={s.id} id={s.id} position={index}>
-                        <IndexTable.Cell>
-                          <Text as="span" variant="bodyMd" fontWeight="bold">
-                            {s.firstName} {s.lastName}
-                          </Text>
-                        </IndexTable.Cell>
-                        <IndexTable.Cell>
-                          <Text as="span" variant="bodySm" tone="subdued">
-                            {s.email}
-                          </Text>
-                        </IndexTable.Cell>
-                        <IndexTable.Cell>
-                          <fetcher.Form method="post">
-                            <input
-                              type="hidden"
-                              name="intent"
-                              value="toggle-invoice-permission"
-                            />
-                            <input type="hidden" name="staffId" value={s.id} />
-                            <input
-                              type="hidden"
-                              name="currentValue"
-                              value={String(s.canSendInvoice)}
-                            />
-                            <InlineStack gap="200" blockAlign="center">
-                              <Badge
-                                tone={s.canSendInvoice ? "success" : "new"}
-                              >
-                                {s.canSendInvoice ? "Can Send" : "Restricted"}
-                              </Badge>
-                              <Button variant="plain" submit>
-                                {s.canSendInvoice ? "Restrict" : "Allow"}
-                              </Button>
-                            </InlineStack>
-                          </fetcher.Form>
-                        </IndexTable.Cell>
-                      </IndexTable.Row>
-                    ))}
+                    {staffMembers.map((s, index) => {
+                      const isStaffAdmin = adminStaffIds.includes(s.id);
+                      return (
+                        <IndexTable.Row key={s.id} id={s.id} position={index}>
+                          <IndexTable.Cell>
+                            <Text as="span" variant="bodyMd" fontWeight="bold">
+                              {s.firstName} {s.lastName}
+                            </Text>
+                          </IndexTable.Cell>
+                          <IndexTable.Cell>
+                            <Text as="span" variant="bodySm" tone="subdued">
+                              {s.email}
+                            </Text>
+                          </IndexTable.Cell>
+                          <IndexTable.Cell>
+                            <fetcher.Form method="post">
+                              <input type="hidden" name="intent" value="toggle-admin" />
+                              <input type="hidden" name="staffId" value={s.id} />
+                              <input type="hidden" name="currentValue" value={String(isStaffAdmin)} />
+                              <InlineStack gap="200" blockAlign="center">
+                                <Badge tone={isStaffAdmin ? "success" : "new"}>
+                                  {isStaffAdmin ? "Admin" : "Staff"}
+                                </Badge>
+                                <Button variant="plain" submit>
+                                  {isStaffAdmin ? "Revoke" : "Grant"}
+                                </Button>
+                              </InlineStack>
+                            </fetcher.Form>
+                          </IndexTable.Cell>
+                          <IndexTable.Cell>
+                            <fetcher.Form method="post">
+                              <input
+                                type="hidden"
+                                name="intent"
+                                value="toggle-invoice-permission"
+                              />
+                              <input type="hidden" name="staffId" value={s.id} />
+                              <input
+                                type="hidden"
+                                name="currentValue"
+                                value={String(s.canSendInvoice)}
+                              />
+                              <InlineStack gap="200" blockAlign="center">
+                                <Badge
+                                  tone={s.canSendInvoice ? "success" : "new"}
+                                >
+                                  {s.canSendInvoice ? "Can Send" : "Restricted"}
+                                </Badge>
+                                <Button variant="plain" submit>
+                                  {s.canSendInvoice ? "Restrict" : "Allow"}
+                                </Button>
+                              </InlineStack>
+                            </fetcher.Form>
+                          </IndexTable.Cell>
+                        </IndexTable.Row>
+                      );
+                    })}
                   </IndexTable>
                 </BlockStack>
               </Card>
