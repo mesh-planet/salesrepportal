@@ -390,14 +390,18 @@ export default function CompanyCatalog() {
     addressFetcher,
   ]);
 
-  // Close modal + reload page on successful update
+  // Close modal + reload page on successful update; on server error, return
+  // to the form view so the error banner is visible and the rep can edit.
   useEffect(() => {
-    if (addressFetcher.state === "idle" && addressFetcher.data?.success) {
+    if (addressFetcher.state !== "idle" || !addressFetcher.data) return;
+    if (addressFetcher.data.success) {
       shopify.toast.show("Shipping address updated");
       closeAddressModal();
       navigate(`/app/company/${location.id.replace("gid://shopify/CompanyLocation/", "")}`, {
         replace: true,
       });
+    } else if ((addressFetcher.data.errors ?? []).length > 0) {
+      setAddressConfirmOpen(false);
     }
   }, [addressFetcher.state, addressFetcher.data, shopify, closeAddressModal, navigate, location.id]);
 
