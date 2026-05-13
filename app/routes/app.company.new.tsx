@@ -32,146 +32,16 @@ import {
 import { assignCatalogToNewLocation } from "../lib/graphql/catalogs";
 import { invalidatePattern } from "../lib/cache.server";
 import prisma from "../db.server";
+import { getAllCountries } from "../lib/data/countries.server";
+import { CountryCombobox } from "../components/CountryCombobox";
+import { ZoneCombobox } from "../components/ZoneCombobox";
+import { PhoneCodeCombobox } from "../components/PhoneCodeCombobox";
 
-const PHONE_CODES = [
-  { code: "US", dial: "+1", flag: "\u{1F1FA}\u{1F1F8}" },
-  { code: "CA", dial: "+1", flag: "\u{1F1E8}\u{1F1E6}" },
-  { code: "GB", dial: "+44", flag: "\u{1F1EC}\u{1F1E7}" },
-  { code: "AU", dial: "+61", flag: "\u{1F1E6}\u{1F1FA}" },
-  { code: "DE", dial: "+49", flag: "\u{1F1E9}\u{1F1EA}" },
-  { code: "FR", dial: "+33", flag: "\u{1F1EB}\u{1F1F7}" },
-  { code: "IT", dial: "+39", flag: "\u{1F1EE}\u{1F1F9}" },
-  { code: "ES", dial: "+34", flag: "\u{1F1EA}\u{1F1F8}" },
-  { code: "NL", dial: "+31", flag: "\u{1F1F3}\u{1F1F1}" },
-  { code: "JP", dial: "+81", flag: "\u{1F1EF}\u{1F1F5}" },
-  { code: "MX", dial: "+52", flag: "\u{1F1F2}\u{1F1FD}" },
-  { code: "BR", dial: "+55", flag: "\u{1F1E7}\u{1F1F7}" },
-  { code: "AR", dial: "+54", flag: "\u{1F1E6}\u{1F1F7}" },
-  { code: "CO", dial: "+57", flag: "\u{1F1E8}\u{1F1F4}" },
-  { code: "CL", dial: "+56", flag: "\u{1F1E8}\u{1F1F1}" },
-  { code: "PE", dial: "+51", flag: "\u{1F1F5}\u{1F1EA}" },
-  { code: "CN", dial: "+86", flag: "\u{1F1E8}\u{1F1F3}" },
-  { code: "KR", dial: "+82", flag: "\u{1F1F0}\u{1F1F7}" },
-  { code: "IN", dial: "+91", flag: "\u{1F1EE}\u{1F1F3}" },
-  { code: "SG", dial: "+65", flag: "\u{1F1F8}\u{1F1EC}" },
-  { code: "NZ", dial: "+64", flag: "\u{1F1F3}\u{1F1FF}" },
-  { code: "BE", dial: "+32", flag: "\u{1F1E7}\u{1F1EA}" },
-  { code: "AT", dial: "+43", flag: "\u{1F1E6}\u{1F1F9}" },
-  { code: "CH", dial: "+41", flag: "\u{1F1E8}\u{1F1ED}" },
-  { code: "SE", dial: "+46", flag: "\u{1F1F8}\u{1F1EA}" },
-  { code: "NO", dial: "+47", flag: "\u{1F1F3}\u{1F1F4}" },
-  { code: "DK", dial: "+45", flag: "\u{1F1E9}\u{1F1F0}" },
-  { code: "FI", dial: "+358", flag: "\u{1F1EB}\u{1F1EE}" },
-  { code: "PT", dial: "+351", flag: "\u{1F1F5}\u{1F1F9}" },
-  { code: "IE", dial: "+353", flag: "\u{1F1EE}\u{1F1EA}" },
-  { code: "PL", dial: "+48", flag: "\u{1F1F5}\u{1F1F1}" },
-  { code: "CZ", dial: "+420", flag: "\u{1F1E8}\u{1F1FF}" },
-  { code: "IL", dial: "+972", flag: "\u{1F1EE}\u{1F1F1}" },
-  { code: "AE", dial: "+971", flag: "\u{1F1E6}\u{1F1EA}" },
-  { code: "SA", dial: "+966", flag: "\u{1F1F8}\u{1F1E6}" },
-  { code: "ZA", dial: "+27", flag: "\u{1F1FF}\u{1F1E6}" },
-];
-
-const phoneCodeOptions = PHONE_CODES.map((p) => ({
-  label: `${p.flag} ${p.dial}`,
-  value: p.dial,
-}));
-
-interface CountryWithProvinces {
-  code: string;
-  name: string;
-  provinces: Array<{ code: string; name: string }>;
-}
-
-const COUNTRIES: CountryWithProvinces[] = [
-  { code: "US", name: "United States", provinces: [
-    { code: "AL", name: "Alabama" }, { code: "AK", name: "Alaska" }, { code: "AZ", name: "Arizona" },
-    { code: "AR", name: "Arkansas" }, { code: "CA", name: "California" }, { code: "CO", name: "Colorado" },
-    { code: "CT", name: "Connecticut" }, { code: "DE", name: "Delaware" }, { code: "FL", name: "Florida" },
-    { code: "GA", name: "Georgia" }, { code: "HI", name: "Hawaii" }, { code: "ID", name: "Idaho" },
-    { code: "IL", name: "Illinois" }, { code: "IN", name: "Indiana" }, { code: "IA", name: "Iowa" },
-    { code: "KS", name: "Kansas" }, { code: "KY", name: "Kentucky" }, { code: "LA", name: "Louisiana" },
-    { code: "ME", name: "Maine" }, { code: "MD", name: "Maryland" }, { code: "MA", name: "Massachusetts" },
-    { code: "MI", name: "Michigan" }, { code: "MN", name: "Minnesota" }, { code: "MS", name: "Mississippi" },
-    { code: "MO", name: "Missouri" }, { code: "MT", name: "Montana" }, { code: "NE", name: "Nebraska" },
-    { code: "NV", name: "Nevada" }, { code: "NH", name: "New Hampshire" }, { code: "NJ", name: "New Jersey" },
-    { code: "NM", name: "New Mexico" }, { code: "NY", name: "New York" }, { code: "NC", name: "North Carolina" },
-    { code: "ND", name: "North Dakota" }, { code: "OH", name: "Ohio" }, { code: "OK", name: "Oklahoma" },
-    { code: "OR", name: "Oregon" }, { code: "PA", name: "Pennsylvania" }, { code: "RI", name: "Rhode Island" },
-    { code: "SC", name: "South Carolina" }, { code: "SD", name: "South Dakota" }, { code: "TN", name: "Tennessee" },
-    { code: "TX", name: "Texas" }, { code: "UT", name: "Utah" }, { code: "VT", name: "Vermont" },
-    { code: "VA", name: "Virginia" }, { code: "WA", name: "Washington" }, { code: "WV", name: "West Virginia" },
-    { code: "WI", name: "Wisconsin" }, { code: "WY", name: "Wyoming" }, { code: "DC", name: "District of Columbia" },
-  ]},
-  { code: "CA", name: "Canada", provinces: [
-    { code: "AB", name: "Alberta" }, { code: "BC", name: "British Columbia" }, { code: "MB", name: "Manitoba" },
-    { code: "NB", name: "New Brunswick" }, { code: "NL", name: "Newfoundland and Labrador" },
-    { code: "NS", name: "Nova Scotia" }, { code: "NT", name: "Northwest Territories" },
-    { code: "NU", name: "Nunavut" }, { code: "ON", name: "Ontario" }, { code: "PE", name: "Prince Edward Island" },
-    { code: "QC", name: "Quebec" }, { code: "SK", name: "Saskatchewan" }, { code: "YT", name: "Yukon" },
-  ]},
-  { code: "AU", name: "Australia", provinces: [
-    { code: "ACT", name: "Australian Capital Territory" }, { code: "NSW", name: "New South Wales" },
-    { code: "NT", name: "Northern Territory" }, { code: "QLD", name: "Queensland" },
-    { code: "SA", name: "South Australia" }, { code: "TAS", name: "Tasmania" },
-    { code: "VIC", name: "Victoria" }, { code: "WA", name: "Western Australia" },
-  ]},
-  { code: "MX", name: "Mexico", provinces: [
-    { code: "AGU", name: "Aguascalientes" }, { code: "BCN", name: "Baja California" },
-    { code: "BCS", name: "Baja California Sur" }, { code: "CAM", name: "Campeche" },
-    { code: "CHP", name: "Chiapas" }, { code: "CHH", name: "Chihuahua" },
-    { code: "COA", name: "Coahuila" }, { code: "COL", name: "Colima" },
-    { code: "CMX", name: "Ciudad de Mexico" }, { code: "DUR", name: "Durango" },
-    { code: "GUA", name: "Guanajuato" }, { code: "GRO", name: "Guerrero" },
-    { code: "HID", name: "Hidalgo" }, { code: "JAL", name: "Jalisco" },
-    { code: "MEX", name: "Mexico State" }, { code: "MIC", name: "Michoacan" },
-    { code: "MOR", name: "Morelos" }, { code: "NAY", name: "Nayarit" },
-    { code: "NLE", name: "Nuevo Leon" }, { code: "OAX", name: "Oaxaca" },
-    { code: "PUE", name: "Puebla" }, { code: "QUE", name: "Queretaro" },
-    { code: "ROO", name: "Quintana Roo" }, { code: "SLP", name: "San Luis Potosi" },
-    { code: "SIN", name: "Sinaloa" }, { code: "SON", name: "Sonora" },
-    { code: "TAB", name: "Tabasco" }, { code: "TAM", name: "Tamaulipas" },
-    { code: "TLA", name: "Tlaxcala" }, { code: "VER", name: "Veracruz" },
-    { code: "YUC", name: "Yucatan" }, { code: "ZAC", name: "Zacatecas" },
-  ]},
-  { code: "GB", name: "United Kingdom", provinces: [] },
-  { code: "DE", name: "Germany", provinces: [] },
-  { code: "FR", name: "France", provinces: [] },
-  { code: "IT", name: "Italy", provinces: [] },
-  { code: "ES", name: "Spain", provinces: [] },
-  { code: "NL", name: "Netherlands", provinces: [] },
-  { code: "JP", name: "Japan", provinces: [] },
-  { code: "BR", name: "Brazil", provinces: [] },
-  { code: "AR", name: "Argentina", provinces: [] },
-  { code: "CO", name: "Colombia", provinces: [] },
-  { code: "CL", name: "Chile", provinces: [] },
-  { code: "PE", name: "Peru", provinces: [] },
-  { code: "CN", name: "China", provinces: [] },
-  { code: "KR", name: "South Korea", provinces: [] },
-  { code: "IN", name: "India", provinces: [] },
-  { code: "SG", name: "Singapore", provinces: [] },
-  { code: "NZ", name: "New Zealand", provinces: [] },
-  { code: "BE", name: "Belgium", provinces: [] },
-  { code: "AT", name: "Austria", provinces: [] },
-  { code: "CH", name: "Switzerland", provinces: [] },
-  { code: "SE", name: "Sweden", provinces: [] },
-  { code: "NO", name: "Norway", provinces: [] },
-  { code: "DK", name: "Denmark", provinces: [] },
-  { code: "FI", name: "Finland", provinces: [] },
-  { code: "PT", name: "Portugal", provinces: [] },
-  { code: "IE", name: "Ireland", provinces: [] },
-  { code: "PL", name: "Poland", provinces: [] },
-  { code: "CZ", name: "Czech Republic", provinces: [] },
-  { code: "IL", name: "Israel", provinces: [] },
-  { code: "AE", name: "United Arab Emirates", provinces: [] },
-  { code: "SA", name: "Saudi Arabia", provinces: [] },
-  { code: "ZA", name: "South Africa", provinces: [] },
-];
 
 export const loader = async ({ request }: LoaderFunctionArgs) => {
   const { admin } = await requireAuth(request);
   const templates = await fetchPaymentTermsTemplates(admin);
-  return json({ paymentTermsTemplates: templates, countries: COUNTRIES });
+  return json({ paymentTermsTemplates: templates, countries: getAllCountries() });
 };
 
 export const action = async ({ request }: ActionFunctionArgs) => {
@@ -213,7 +83,6 @@ export const action = async ({ request }: ActionFunctionArgs) => {
     const countryCode = formData.get("countryCode") as string;
     const addrFirstName = (formData.get("addrFirstName") as string).trim();
     const addrLastName = (formData.get("addrLastName") as string).trim();
-    const addrCompany = (formData.get("addrCompany") as string).trim();
     const address1 = (formData.get("address1") as string).trim();
     const address2 = (formData.get("address2") as string).trim();
     const city = (formData.get("city") as string).trim();
@@ -479,26 +348,7 @@ export default function NewCompany() {
       })),
   ];
 
-  const countryOptions = [
-    { label: "Select a country...", value: "" },
-    ...(countries as CountryWithProvinces[]).map((c) => ({
-      label: c.name,
-      value: c.code,
-    })),
-  ];
-
-  const selectedCountry = (countries as CountryWithProvinces[]).find(
-    (c) => c.code === countryCode,
-  );
-  const provinceOptions = selectedCountry?.provinces?.length
-    ? [
-        { label: "Select a state/province...", value: "" },
-        ...selectedCountry.provinces.map((p) => ({
-          label: p.name,
-          value: p.code,
-        })),
-      ]
-    : null;
+  const selectedCountry = countries.find((c) => c.code === countryCode);
 
   const canProceedStep1 = contactEmail && customerSearched;
   const canProceedStep2 = companyName;
@@ -613,10 +463,10 @@ export default function NewCompany() {
                         />
                       </InlineGrid>
                       <InlineStack gap="200" blockAlign="end">
-                        <div style={{ width: "110px" }}>
-                          <Select
+                        <div style={{ width: "180px" }}>
+                          <PhoneCodeCombobox
                             label="Code"
-                            options={phoneCodeOptions}
+                            countries={countries}
                             value={contactPhoneCode}
                             onChange={setContactPhoneCode}
                             disabled={customerFound}
@@ -691,9 +541,9 @@ export default function NewCompany() {
                   <Text as="h2" variant="headingMd">
                     Shipping Address
                   </Text>
-                  <Select
+                  <CountryCombobox
                     label="Country/region"
-                    options={countryOptions}
+                    countries={countries}
                     value={countryCode}
                     onChange={(v) => {
                       setCountryCode(v);
@@ -740,21 +590,12 @@ export default function NewCompany() {
                       onChange={setCity}
                       autoComplete="address-level2"
                     />
-                    {provinceOptions ? (
-                      <Select
-                        label="State/Province"
-                        options={provinceOptions}
-                        value={zoneCode}
-                        onChange={setZoneCode}
-                      />
-                    ) : (
-                      <TextField
-                        label="State/Province"
-                        value={zoneCode}
-                        onChange={setZoneCode}
-                        autoComplete="address-level1"
-                      />
-                    )}
+                    <ZoneCombobox
+                      label="State/Province"
+                      countryCode={countryCode}
+                      value={zoneCode}
+                      onChange={setZoneCode}
+                    />
                   </InlineGrid>
                   <TextField
                     label="ZIP code"
@@ -763,10 +604,10 @@ export default function NewCompany() {
                     autoComplete="postal-code"
                   />
                   <InlineStack gap="200" blockAlign="end">
-                    <div style={{ width: "110px" }}>
-                      <Select
+                    <div style={{ width: "180px" }}>
+                      <PhoneCodeCombobox
                         label="Code"
-                        options={phoneCodeOptions}
+                        countries={countries}
                         value={addrPhoneCode}
                         onChange={setAddrPhoneCode}
                       />

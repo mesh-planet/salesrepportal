@@ -5,10 +5,17 @@ export interface Company {
 
 export interface Address {
   address1: string | null;
+  address2?: string | null;
   city: string | null;
   province: string | null;
   country: string | null;
+  countryCode?: string | null;
+  zoneCode?: string | null;
   zip: string | null;
+  phone?: string | null;
+  recipient?: string | null;
+  firstName?: string | null;
+  lastName?: string | null;
 }
 
 export interface CatalogSummary {

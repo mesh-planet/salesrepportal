@@ -1,11 +1,11 @@
-import { json, type LoaderFunctionArgs } from "@remix-run/node";
+import { json, type LoaderFunctionArgs, type ActionFunctionArgs } from "@remix-run/node";
 import {
   useLoaderData,
   useNavigate,
   useSearchParams,
   useFetcher,
 } from "@remix-run/react";
-import { useState, useCallback, useEffect } from "react";
+import { useState, useCallback, useEffect, useMemo } from "react";
 import {
   Page,
   Layout,
@@ -15,17 +15,20 @@ import {
   TextField,
   Button,
   Banner,
-  SkeletonPage,
-  SkeletonBodyText,
   InlineStack,
   InlineGrid,
   EmptyState,
   Select,
+  Modal,
+  Divider,
 } from "@shopify/polaris";
-import { TitleBar } from "@shopify/app-bridge-react";
+import { TitleBar, useAppBridge } from "@shopify/app-bridge-react";
 
 import { requireStaffAccess } from "../lib/auth.server";
-import { fetchCompanyLocationWithCatalogs } from "../lib/graphql/companies";
+import {
+  fetchCompanyLocationWithCatalogs,
+  assignCompanyLocationShippingAddress,
+} from "../lib/graphql/companies";
 import { fetchCatalogForLocation } from "../lib/graphql/catalogs";
 import { fetchCatalogProducts } from "../lib/graphql/products";
 import { fetchPriceListPrices } from "../lib/graphql/price-list";
@@ -34,7 +37,13 @@ import { AppBranding } from "../components/AppBranding";
 import { ProductGrid } from "../components/ProductGrid";
 import { CartSummary } from "../components/CartSummary";
 import { FloatingCartButton } from "../components/FloatingCartButton";
+import { CountryCombobox } from "../components/CountryCombobox";
+import { ZoneCombobox } from "../components/ZoneCombobox";
+import { PhoneCodeCombobox } from "../components/PhoneCodeCombobox";
 import { useCartContext } from "../components/CartProvider";
+import { getAllCountries } from "../lib/data/countries.server";
+import { sendAddressChangeSlackNotification } from "../lib/slack.server";
+import { invalidatePattern } from "../lib/cache.server";
 import prisma from "../db.server";
 import type { Product, PageInfo } from "../types";
 
@@ -80,6 +89,7 @@ export const loader = async ({ request, params }: LoaderFunctionArgs) => {
         company: location.company,
         shippingAddress: location.shippingAddress,
       },
+      countries: getAllCountries(),
       products: [] as Product[],
       pageInfo: { hasNextPage: false, endCursor: null } as PageInfo,
       priceMap: {} as Record<string, string>,
@@ -124,6 +134,7 @@ export const loader = async ({ request, params }: LoaderFunctionArgs) => {
       company: location.company,
       shippingAddress: location.shippingAddress,
     },
+    countries: getAllCountries(),
     products: productsResult.products,
     pageInfo: productsResult.pageInfo,
     priceMap: priceMapToObject(priceMap),
@@ -140,24 +151,256 @@ export const loader = async ({ request, params }: LoaderFunctionArgs) => {
   });
 };
 
+const PHONE_REGEX = /^[+\-()\s\d]+$/;
+const PHONE_REGEX_CLIENT = /^[+\-()\s\d]+$/;
+
+export const action = async ({ request, params }: ActionFunctionArgs) => {
+  const companyLocationId = `gid://shopify/CompanyLocation/${params.id}`;
+  const { admin, staffMember, shop } = await requireStaffAccess(
+    request,
+    companyLocationId
+  );
+
+  const formData = await request.formData();
+  const intent = formData.get("intent");
+
+  if (intent !== "update-shipping-address") {
+    return json({ success: false, errors: ["Unknown intent"] }, { status: 400 });
+  }
+
+  const countryCode = (formData.get("countryCode") as string ?? "").trim().toUpperCase();
+  const zoneCode = (formData.get("zoneCode") as string ?? "").trim().toUpperCase();
+  const address1 = (formData.get("address1") as string ?? "").trim();
+  const address2 = (formData.get("address2") as string ?? "").trim();
+  const city = (formData.get("city") as string ?? "").trim();
+  const zip = (formData.get("zip") as string ?? "").trim();
+  const recipient = (formData.get("recipient") as string ?? "").trim();
+  const firstName = (formData.get("firstName") as string ?? "").trim();
+  const lastName = (formData.get("lastName") as string ?? "").trim();
+  const phone = (formData.get("phone") as string ?? "").trim();
+
+  const errors: string[] = [];
+  if (!countryCode) errors.push("Country is required");
+  if (countryCode && !/^[A-Z]{2}$/.test(countryCode)) {
+    errors.push("Invalid country code");
+  }
+  if (phone && !PHONE_REGEX.test(phone)) {
+    errors.push("Phone contains invalid characters");
+  }
+
+  if (errors.length > 0) {
+    return json({ success: false, errors }, { status: 400 });
+  }
+
+  // Fetch current address for diff before mutating
+  const before = await fetchCompanyLocationWithCatalogs(admin, companyLocationId);
+  const beforeAddr = before.shippingAddress;
+
+  const result = await assignCompanyLocationShippingAddress(admin, companyLocationId, {
+    address1: address1 || undefined,
+    address2: address2 || undefined,
+    city: city || undefined,
+    zip: zip || undefined,
+    recipient: recipient || undefined,
+    firstName: firstName || undefined,
+    lastName: lastName || undefined,
+    phone: phone || undefined,
+    zoneCode: zoneCode || undefined,
+    countryCode,
+  });
+
+  if (!result.success) {
+    return json({ success: false, errors: result.errors }, { status: 400 });
+  }
+
+  invalidatePattern(`location:${companyLocationId}`);
+
+  // Build diff for Slack
+  const fieldsToCompare: Array<{
+    label: string;
+    before: string | null | undefined;
+    after: string;
+  }> = [
+    { label: "Address 1", before: beforeAddr?.address1, after: address1 },
+    { label: "Address 2", before: beforeAddr?.address2, after: address2 },
+    { label: "City", before: beforeAddr?.city, after: city },
+    { label: "ZIP", before: beforeAddr?.zip, after: zip },
+    { label: "State/Region", before: beforeAddr?.zoneCode, after: zoneCode },
+    { label: "Country", before: beforeAddr?.countryCode, after: countryCode },
+    { label: "Recipient", before: beforeAddr?.recipient, after: recipient },
+    { label: "First name", before: beforeAddr?.firstName, after: firstName },
+    { label: "Last name", before: beforeAddr?.lastName, after: lastName },
+    { label: "Phone", before: beforeAddr?.phone, after: phone },
+  ];
+  const changes = fieldsToCompare
+    .filter((f) => (f.before ?? "") !== (f.after ?? ""))
+    .map((f) => ({
+      field: f.label,
+      before: f.before ?? "",
+      after: f.after ?? "",
+    }));
+
+  if (changes.length > 0) {
+    const repName = `${staffMember.firstName} ${staffMember.lastName}`.trim();
+    const locationNumericId = (params.id ?? "").trim();
+    sendAddressChangeSlackNotification(shop, {
+      repName,
+      repEmail: staffMember.email ?? "",
+      companyName: before.company.name,
+      locationName: before.name,
+      changes,
+      shopDomain: shop,
+      locationNumericId,
+    }).catch((err) =>
+      console.error("[CompanyDetail] Slack notification failed:", err)
+    );
+  }
+
+  return json({ success: true, errors: [] as string[] });
+};
+
 export default function CompanyCatalog() {
   const {
     staffMember,
     location,
+    countries,
     products: initialProducts,
     pageInfo: initialPageInfo,
     priceMap,
     currencyCode,
-    publicationId,
     noCatalog,
     filterableCollections,
     currentSearch,
     currentCollection,
   } = useLoaderData<typeof loader>();
   const navigate = useNavigate();
+  const shopify = useAppBridge();
   const { setCompany, addItem, cart } = useCartContext();
   const fetcher = useFetcher<typeof loader>();
+  const addressFetcher = useFetcher<{ success: boolean; errors: string[] }>();
   const [searchParams, setSearchParams] = useSearchParams();
+
+  // Edit shipping address modal state
+  const initialAddr = location.shippingAddress;
+  const [addressModalOpen, setAddressModalOpen] = useState(false);
+  const [addressConfirmOpen, setAddressConfirmOpen] = useState(false);
+  const [editAddress1, setEditAddress1] = useState(initialAddr?.address1 ?? "");
+  const [editAddress2, setEditAddress2] = useState(initialAddr?.address2 ?? "");
+  const [editCity, setEditCity] = useState(initialAddr?.city ?? "");
+  const [editZip, setEditZip] = useState(initialAddr?.zip ?? "");
+  const [editCountryCode, setEditCountryCode] = useState(
+    initialAddr?.countryCode ?? ""
+  );
+  const [editZoneCode, setEditZoneCode] = useState(initialAddr?.zoneCode ?? "");
+  const [editRecipient, setEditRecipient] = useState(initialAddr?.recipient ?? "");
+  const [editFirstName, setEditFirstName] = useState(initialAddr?.firstName ?? "");
+  const [editLastName, setEditLastName] = useState(initialAddr?.lastName ?? "");
+  const [editPhone, setEditPhone] = useState(initialAddr?.phone ?? "");
+  const [editPhoneCode, setEditPhoneCode] = useState("+1");
+  const [phoneError, setPhoneError] = useState<string | null>(null);
+
+  const resetEditForm = useCallback(() => {
+    setEditAddress1(initialAddr?.address1 ?? "");
+    setEditAddress2(initialAddr?.address2 ?? "");
+    setEditCity(initialAddr?.city ?? "");
+    setEditZip(initialAddr?.zip ?? "");
+    setEditCountryCode(initialAddr?.countryCode ?? "");
+    setEditZoneCode(initialAddr?.zoneCode ?? "");
+    setEditRecipient(initialAddr?.recipient ?? "");
+    setEditFirstName(initialAddr?.firstName ?? "");
+    setEditLastName(initialAddr?.lastName ?? "");
+    setEditPhone(initialAddr?.phone ?? "");
+    setEditPhoneCode("+1");
+    setPhoneError(null);
+  }, [initialAddr]);
+
+  const openAddressModal = useCallback(() => {
+    resetEditForm();
+    setAddressModalOpen(true);
+  }, [resetEditForm]);
+
+  const closeAddressModal = useCallback(() => {
+    setAddressModalOpen(false);
+    setAddressConfirmOpen(false);
+  }, []);
+
+  const fullPhone = editPhone ? `${editPhoneCode} ${editPhone}`.trim() : "";
+
+  const diff = useMemo(() => {
+    const fields: Array<{ label: string; before: string; after: string }> = [
+      { label: "Recipient", before: initialAddr?.recipient ?? "", after: editRecipient },
+      { label: "First name", before: initialAddr?.firstName ?? "", after: editFirstName },
+      { label: "Last name", before: initialAddr?.lastName ?? "", after: editLastName },
+      { label: "Address 1", before: initialAddr?.address1 ?? "", after: editAddress1 },
+      { label: "Address 2", before: initialAddr?.address2 ?? "", after: editAddress2 },
+      { label: "City", before: initialAddr?.city ?? "", after: editCity },
+      { label: "State/Region", before: initialAddr?.zoneCode ?? "", after: editZoneCode },
+      { label: "Country", before: initialAddr?.countryCode ?? "", after: editCountryCode },
+      { label: "ZIP", before: initialAddr?.zip ?? "", after: editZip },
+      { label: "Phone", before: initialAddr?.phone ?? "", after: fullPhone },
+    ];
+    return fields.filter((f) => f.before !== f.after);
+  }, [
+    initialAddr,
+    editRecipient,
+    editFirstName,
+    editLastName,
+    editAddress1,
+    editAddress2,
+    editCity,
+    editZoneCode,
+    editCountryCode,
+    editZip,
+    fullPhone,
+  ]);
+
+  const handleReviewClick = useCallback(() => {
+    if (editPhone && !PHONE_REGEX_CLIENT.test(editPhone)) {
+      setPhoneError("Phone contains invalid characters");
+      return;
+    }
+    setPhoneError(null);
+    setAddressConfirmOpen(true);
+  }, [editPhone]);
+
+  const handleConfirmSubmit = useCallback(() => {
+    const formData = new FormData();
+    formData.set("intent", "update-shipping-address");
+    formData.set("countryCode", editCountryCode);
+    formData.set("zoneCode", editZoneCode);
+    formData.set("address1", editAddress1);
+    formData.set("address2", editAddress2);
+    formData.set("city", editCity);
+    formData.set("zip", editZip);
+    formData.set("recipient", editRecipient);
+    formData.set("firstName", editFirstName);
+    formData.set("lastName", editLastName);
+    formData.set("phone", fullPhone);
+    addressFetcher.submit(formData, { method: "POST" });
+  }, [
+    editCountryCode,
+    editZoneCode,
+    editAddress1,
+    editAddress2,
+    editCity,
+    editZip,
+    editRecipient,
+    editFirstName,
+    editLastName,
+    fullPhone,
+    addressFetcher,
+  ]);
+
+  // Close modal + reload page on successful update
+  useEffect(() => {
+    if (addressFetcher.state === "idle" && addressFetcher.data?.success) {
+      shopify.toast.show("Shipping address updated");
+      closeAddressModal();
+      navigate(`/app/company/${location.id.replace("gid://shopify/CompanyLocation/", "")}`, {
+        replace: true,
+      });
+    }
+  }, [addressFetcher.state, addressFetcher.data, shopify, closeAddressModal, navigate, location.id]);
 
   const [allProducts, setAllProducts] = useState<Product[]>(
     initialProducts as Product[]
@@ -253,6 +496,177 @@ export default function CompanyCatalog() {
     navigate("/app/cart");
   }, [navigate]);
 
+  const editAddressAction = {
+    content: "Edit shipping address",
+    onAction: openAddressModal,
+  };
+
+  const isUpdating = addressFetcher.state === "submitting";
+  const updateErrors = (addressFetcher.data?.errors as string[] | undefined) ?? [];
+
+  function renderAddressModal() {
+    return (
+      <Modal
+        open={addressModalOpen}
+        onClose={closeAddressModal}
+        title={`Edit shipping address — ${location.company.name} (${location.name})`}
+        primaryAction={{
+          content: "Review changes",
+          onAction: handleReviewClick,
+          disabled: !editCountryCode || diff.length === 0,
+        }}
+        secondaryActions={[{ content: "Cancel", onAction: closeAddressModal }]}
+      >
+        <Modal.Section>
+          <BlockStack gap="400">
+            {updateErrors.length > 0 && (
+              <Banner tone="critical">
+                {updateErrors.map((err, i) => (
+                  <p key={i}>{err}</p>
+                ))}
+              </Banner>
+            )}
+            <Banner tone="warning">
+              <p>
+                This affects all future orders for this location, including
+                orders placed by other reps and via Shopify directly.
+              </p>
+            </Banner>
+            <TextField
+              label="Recipient (company name on shipping label)"
+              value={editRecipient}
+              onChange={setEditRecipient}
+              autoComplete="organization"
+            />
+            <InlineGrid columns={2} gap="300">
+              <TextField
+                label="First name"
+                value={editFirstName}
+                onChange={setEditFirstName}
+                autoComplete="given-name"
+              />
+              <TextField
+                label="Last name"
+                value={editLastName}
+                onChange={setEditLastName}
+                autoComplete="family-name"
+              />
+            </InlineGrid>
+            <TextField
+              label="Address"
+              value={editAddress1}
+              onChange={setEditAddress1}
+              autoComplete="address-line1"
+            />
+            <TextField
+              label="Apartment, suite, etc."
+              value={editAddress2}
+              onChange={setEditAddress2}
+              autoComplete="address-line2"
+            />
+            <CountryCombobox
+              label="Country/region"
+              countries={countries}
+              value={editCountryCode}
+              onChange={(v) => {
+                setEditCountryCode(v);
+                setEditZoneCode("");
+              }}
+              requiredIndicator
+            />
+            <InlineGrid columns={2} gap="300">
+              <TextField
+                label="City"
+                value={editCity}
+                onChange={setEditCity}
+                autoComplete="address-level2"
+              />
+              <ZoneCombobox
+                label="State/Region"
+                countryCode={editCountryCode}
+                value={editZoneCode}
+                onChange={setEditZoneCode}
+              />
+            </InlineGrid>
+            <TextField
+              label="ZIP/Postal code"
+              value={editZip}
+              onChange={setEditZip}
+              autoComplete="postal-code"
+            />
+            <InlineStack gap="200" blockAlign="end">
+              <div style={{ width: "180px" }}>
+                <PhoneCodeCombobox
+                  label="Phone code"
+                  countries={countries}
+                  value={editPhoneCode}
+                  onChange={setEditPhoneCode}
+                />
+              </div>
+              <div style={{ flex: 1 }}>
+                <TextField
+                  label="Phone"
+                  value={editPhone}
+                  onChange={setEditPhone}
+                  autoComplete="tel"
+                  error={phoneError ?? undefined}
+                />
+              </div>
+            </InlineStack>
+          </BlockStack>
+        </Modal.Section>
+
+        {addressConfirmOpen && (
+          <Modal.Section>
+            <BlockStack gap="300">
+              <Divider />
+              <Text as="h3" variant="headingMd">
+                Review changes
+              </Text>
+              {diff.length === 0 ? (
+                <Text as="p" variant="bodyMd" tone="subdued">
+                  No changes detected.
+                </Text>
+              ) : (
+                <BlockStack gap="200">
+                  {diff.map((d) => (
+                    <InlineStack key={d.label} gap="200" blockAlign="start">
+                      <div style={{ minWidth: 130 }}>
+                        <Text as="span" variant="bodySm" tone="subdued">
+                          {d.label}:
+                        </Text>
+                      </div>
+                      <Text as="span" variant="bodyMd">
+                        <span style={{ textDecoration: "line-through", opacity: 0.6 }}>
+                          {d.before || "(empty)"}
+                        </span>
+                        {" → "}
+                        <strong>{d.after || "(empty)"}</strong>
+                      </Text>
+                    </InlineStack>
+                  ))}
+                </BlockStack>
+              )}
+              <InlineStack gap="200" align="end">
+                <Button onClick={() => setAddressConfirmOpen(false)}>
+                  Keep editing
+                </Button>
+                <Button
+                  variant="primary"
+                  onClick={handleConfirmSubmit}
+                  loading={isUpdating}
+                  disabled={diff.length === 0}
+                >
+                  Confirm and save
+                </Button>
+              </InlineStack>
+            </BlockStack>
+          </Modal.Section>
+        )}
+      </Modal>
+    );
+  }
+
   if (noCatalog) {
     return (
       <>
@@ -260,6 +674,7 @@ export default function CompanyCatalog() {
         <Page
           backAction={{ content: "Dashboard", url: "/app" }}
           title={`${location.company.name} — ${location.name}`}
+          secondaryActions={[editAddressAction]}
         >
           <Banner tone="warning">
             <p>
@@ -268,6 +683,7 @@ export default function CompanyCatalog() {
             </p>
           </Banner>
         </Page>
+        {renderAddressModal()}
       </>
     );
   }
@@ -278,6 +694,7 @@ export default function CompanyCatalog() {
       <Page
         backAction={{ content: "Dashboard", url: "/app" }}
         title={`${location.company.name} — ${location.name}`}
+        secondaryActions={[editAddressAction]}
       >
         <TitleBar title={location.company.name} />
         <Layout>
@@ -358,6 +775,7 @@ export default function CompanyCatalog() {
         currencyCode={currencyCode}
         onReviewOrder={handleReviewOrder}
       />
+      {renderAddressModal()}
     </>
   );
 }

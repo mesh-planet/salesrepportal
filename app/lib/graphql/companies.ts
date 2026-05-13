@@ -46,17 +46,31 @@ export const COMPANY_LOCATION_CATALOGS_QUERY = `#graphql
       }
       billingAddress {
         address1
+        address2
         city
         province
         country
+        countryCode
+        zoneCode
         zip
+        phone
+        recipient
+        firstName
+        lastName
       }
       shippingAddress {
         address1
+        address2
         city
         province
         country
+        countryCode
+        zoneCode
         zip
+        phone
+        recipient
+        firstName
+        lastName
       }
       catalogs(first: 10) {
         nodes {
@@ -452,4 +466,109 @@ export async function fetchPaymentTermsTemplates(
   }
 
   return json.data?.paymentTermsTemplates ?? [];
+}
+
+const COMPANY_LOCATION_ASSIGN_ADDRESS_MUTATION = `#graphql
+  mutation CompanyLocationAssignAddress(
+    $locationId: ID!
+    $address: CompanyAddressInput!
+    $addressTypes: [CompanyAddressType!]!
+  ) {
+    companyLocationAssignAddress(
+      locationId: $locationId
+      address: $address
+      addressTypes: $addressTypes
+    ) {
+      addresses {
+        id
+        address1
+        address2
+        city
+        zoneCode
+        countryCode
+        zip
+        phone
+        recipient
+        firstName
+        lastName
+      }
+      userErrors {
+        field
+        message
+        code
+      }
+    }
+  }
+`;
+
+export interface CompanyAddressInput {
+  address1?: string;
+  address2?: string;
+  city?: string;
+  zip?: string;
+  recipient?: string;
+  firstName?: string;
+  lastName?: string;
+  phone?: string;
+  zoneCode?: string;
+  countryCode: string;
+}
+
+interface AssignAddressResponse {
+  data?: {
+    companyLocationAssignAddress: {
+      addresses: Array<{
+        id: string;
+        address1: string | null;
+        address2: string | null;
+        city: string | null;
+        zoneCode: string | null;
+        countryCode: string | null;
+        zip: string | null;
+        phone: string | null;
+        recipient: string | null;
+        firstName: string | null;
+        lastName: string | null;
+      }>;
+      userErrors: Array<{ field: string[] | null; message: string; code: string | null }>;
+    };
+  };
+  errors?: Array<{ message: string }>;
+}
+
+export async function assignCompanyLocationShippingAddress(
+  admin: { graphql: Function },
+  locationId: string,
+  address: CompanyAddressInput,
+): Promise<{ success: boolean; errors: string[] }> {
+  const response = await admin.graphql(COMPANY_LOCATION_ASSIGN_ADDRESS_MUTATION, {
+    variables: {
+      locationId,
+      addressTypes: ["SHIPPING"],
+      address,
+    },
+  });
+
+  const json: AssignAddressResponse = await response.json();
+
+  if (json.errors?.length) {
+    return {
+      success: false,
+      errors: json.errors.map((e) => e.message),
+    };
+  }
+
+  const result = json.data?.companyLocationAssignAddress;
+  if (!result) {
+    return { success: false, errors: ["No response from companyLocationAssignAddress"] };
+  }
+
+  if (result.userErrors.length > 0) {
+    return {
+      success: false,
+      errors: result.userErrors.map((e) => e.message),
+    };
+  }
+
+  return { success: true, errors: [] };
 }

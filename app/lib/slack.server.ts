@@ -138,3 +138,70 @@ export async function sendNewRepSlackNotification(
     body: JSON.stringify(payload),
   }).catch((err) => console.error("[Slack] New rep webhook failed:", err));
 }
+
+interface SlackAddressChangeNotification {
+  repName: string;
+  repEmail: string;
+  companyName: string;
+  locationName: string;
+  changes: Array<{ field: string; before: string; after: string }>;
+  shopDomain: string;
+  locationNumericId: string;
+}
+
+export async function sendAddressChangeSlackNotification(
+  shop: string,
+  notification: SlackAddressChangeNotification,
+): Promise<void> {
+  const setting = await prisma.appSettings.findUnique({
+    where: { shop_key: { shop, key: "slackWebhookUrl" } },
+  });
+
+  if (!setting?.value) return;
+
+  const adminUrl = `https://${notification.shopDomain}/admin/customers/companies/locations/${notification.locationNumericId}`;
+  const diffLines = notification.changes
+    .map((c) => `• *${c.field}:* ${c.before || "_(empty)_"} → ${c.after || "_(empty)_"}`)
+    .join("\n");
+
+  const payload = {
+    blocks: [
+      {
+        type: "header",
+        text: { type: "plain_text", text: "Shipping Address Updated" },
+      },
+      {
+        type: "section",
+        fields: [
+          { type: "mrkdwn", text: `*Sales Rep:*\n${notification.repName} (${notification.repEmail})` },
+          { type: "mrkdwn", text: `*Company:*\n${notification.companyName}` },
+          { type: "mrkdwn", text: `*Location:*\n${notification.locationName}` },
+        ],
+      },
+      {
+        type: "section",
+        text: {
+          type: "mrkdwn",
+          text: `*Changes:*\n${diffLines || "_(no field changes detected)_"}`,
+        },
+      },
+      {
+        type: "actions",
+        elements: [
+          {
+            type: "button",
+            text: { type: "plain_text", text: "View in Shopify" },
+            url: adminUrl,
+          },
+        ],
+      },
+    ],
+    text: `Shipping address updated by ${notification.repName} for ${notification.companyName} — ${notification.locationName}`,
+  };
+
+  fetch(setting.value, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
+  }).catch((err) => console.error("[Slack] Address change webhook failed:", err));
+}
