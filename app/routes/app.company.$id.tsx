@@ -20,7 +20,6 @@ import {
   EmptyState,
   Select,
   Modal,
-  Divider,
 } from "@shopify/polaris";
 import { TitleBar, useAppBridge } from "@shopify/app-bridge-react";
 
@@ -505,124 +504,46 @@ export default function CompanyCatalog() {
   const updateErrors = (addressFetcher.data?.errors as string[] | undefined) ?? [];
 
   function renderAddressModal() {
+    const inReview = addressConfirmOpen;
     return (
       <Modal
         open={addressModalOpen}
         onClose={closeAddressModal}
-        title={`Edit shipping address — ${location.company.name} (${location.name})`}
-        primaryAction={{
-          content: "Review changes",
-          onAction: handleReviewClick,
-          disabled: !editCountryCode || diff.length === 0,
-        }}
-        secondaryActions={[{ content: "Cancel", onAction: closeAddressModal }]}
+        title={
+          inReview
+            ? `Review changes — ${location.company.name} (${location.name})`
+            : `Edit shipping address — ${location.company.name} (${location.name})`
+        }
+        primaryAction={
+          inReview
+            ? {
+                content: "Confirm and save",
+                onAction: handleConfirmSubmit,
+                loading: isUpdating,
+                disabled: diff.length === 0,
+                destructive: true,
+              }
+            : {
+                content: "Review changes",
+                onAction: handleReviewClick,
+                disabled: !editCountryCode || diff.length === 0,
+              }
+        }
+        secondaryActions={[
+          inReview
+            ? { content: "Keep editing", onAction: () => setAddressConfirmOpen(false) }
+            : { content: "Cancel", onAction: closeAddressModal },
+        ]}
       >
-        <Modal.Section>
-          <BlockStack gap="400">
-            {updateErrors.length > 0 && (
-              <Banner tone="critical">
-                {updateErrors.map((err, i) => (
-                  <p key={i}>{err}</p>
-                ))}
-              </Banner>
-            )}
-            <Banner tone="warning">
-              <p>
-                This affects all future orders for this location, including
-                orders placed by other reps and via Shopify directly.
-              </p>
-            </Banner>
-            <TextField
-              label="Recipient (company name on shipping label)"
-              value={editRecipient}
-              onChange={setEditRecipient}
-              autoComplete="organization"
-            />
-            <InlineGrid columns={2} gap="300">
-              <TextField
-                label="First name"
-                value={editFirstName}
-                onChange={setEditFirstName}
-                autoComplete="given-name"
-              />
-              <TextField
-                label="Last name"
-                value={editLastName}
-                onChange={setEditLastName}
-                autoComplete="family-name"
-              />
-            </InlineGrid>
-            <TextField
-              label="Address"
-              value={editAddress1}
-              onChange={setEditAddress1}
-              autoComplete="address-line1"
-            />
-            <TextField
-              label="Apartment, suite, etc."
-              value={editAddress2}
-              onChange={setEditAddress2}
-              autoComplete="address-line2"
-            />
-            <CountryCombobox
-              label="Country/region"
-              countries={countries}
-              value={editCountryCode}
-              onChange={(v) => {
-                setEditCountryCode(v);
-                setEditZoneCode("");
-              }}
-              requiredIndicator
-            />
-            <InlineGrid columns={2} gap="300">
-              <TextField
-                label="City"
-                value={editCity}
-                onChange={setEditCity}
-                autoComplete="address-level2"
-              />
-              <ZoneCombobox
-                label="State/Region"
-                countryCode={editCountryCode}
-                value={editZoneCode}
-                onChange={setEditZoneCode}
-              />
-            </InlineGrid>
-            <TextField
-              label="ZIP/Postal code"
-              value={editZip}
-              onChange={setEditZip}
-              autoComplete="postal-code"
-            />
-            <InlineStack gap="200" blockAlign="end">
-              <div style={{ width: "180px" }}>
-                <PhoneCodeCombobox
-                  label="Phone code"
-                  countries={countries}
-                  value={editPhoneCode}
-                  onChange={setEditPhoneCode}
-                />
-              </div>
-              <div style={{ flex: 1 }}>
-                <TextField
-                  label="Phone"
-                  value={editPhone}
-                  onChange={setEditPhone}
-                  autoComplete="tel"
-                  error={phoneError ?? undefined}
-                />
-              </div>
-            </InlineStack>
-          </BlockStack>
-        </Modal.Section>
-
-        {addressConfirmOpen && (
+        {inReview ? (
           <Modal.Section>
-            <BlockStack gap="300">
-              <Divider />
-              <Text as="h3" variant="headingMd">
-                Review changes
-              </Text>
+            <BlockStack gap="400">
+              <Banner tone="warning">
+                <p>
+                  This affects all future orders for this location, including
+                  orders placed by other reps and via Shopify directly.
+                </p>
+              </Banner>
               {diff.length === 0 ? (
                 <Text as="p" variant="bodyMd" tone="subdued">
                   No changes detected.
@@ -630,7 +551,7 @@ export default function CompanyCatalog() {
               ) : (
                 <BlockStack gap="200">
                   {diff.map((d) => (
-                    <InlineStack key={d.label} gap="200" blockAlign="start">
+                    <InlineStack key={d.label} gap="200" blockAlign="start" wrap={false}>
                       <div style={{ minWidth: 130 }}>
                         <Text as="span" variant="bodySm" tone="subdued">
                           {d.label}:
@@ -647,18 +568,104 @@ export default function CompanyCatalog() {
                   ))}
                 </BlockStack>
               )}
-              <InlineStack gap="200" align="end">
-                <Button onClick={() => setAddressConfirmOpen(false)}>
-                  Keep editing
-                </Button>
-                <Button
-                  variant="primary"
-                  onClick={handleConfirmSubmit}
-                  loading={isUpdating}
-                  disabled={diff.length === 0}
-                >
-                  Confirm and save
-                </Button>
+            </BlockStack>
+          </Modal.Section>
+        ) : (
+          <Modal.Section>
+            <BlockStack gap="400">
+              {updateErrors.length > 0 && (
+                <Banner tone="critical">
+                  {updateErrors.map((err, i) => (
+                    <p key={i}>{err}</p>
+                  ))}
+                </Banner>
+              )}
+              <Banner tone="warning">
+                <p>
+                  This affects all future orders for this location, including
+                  orders placed by other reps and via Shopify directly.
+                </p>
+              </Banner>
+              <TextField
+                label="Recipient (company name on shipping label)"
+                value={editRecipient}
+                onChange={setEditRecipient}
+                autoComplete="organization"
+              />
+              <InlineGrid columns={2} gap="300">
+                <TextField
+                  label="First name"
+                  value={editFirstName}
+                  onChange={setEditFirstName}
+                  autoComplete="given-name"
+                />
+                <TextField
+                  label="Last name"
+                  value={editLastName}
+                  onChange={setEditLastName}
+                  autoComplete="family-name"
+                />
+              </InlineGrid>
+              <TextField
+                label="Address"
+                value={editAddress1}
+                onChange={setEditAddress1}
+                autoComplete="address-line1"
+              />
+              <TextField
+                label="Apartment, suite, etc."
+                value={editAddress2}
+                onChange={setEditAddress2}
+                autoComplete="address-line2"
+              />
+              <CountryCombobox
+                label="Country/region"
+                countries={countries}
+                value={editCountryCode}
+                onChange={(v) => {
+                  setEditCountryCode(v);
+                  setEditZoneCode("");
+                }}
+                requiredIndicator
+              />
+              <InlineGrid columns={2} gap="300">
+                <TextField
+                  label="City"
+                  value={editCity}
+                  onChange={setEditCity}
+                  autoComplete="address-level2"
+                />
+                <ZoneCombobox
+                  label="State/Region"
+                  countryCode={editCountryCode}
+                  value={editZoneCode}
+                  onChange={setEditZoneCode}
+                />
+              </InlineGrid>
+              <TextField
+                label="ZIP/Postal code"
+                value={editZip}
+                onChange={setEditZip}
+                autoComplete="postal-code"
+              />
+              <InlineStack gap="200" blockAlign="end">
+                <div style={{ width: "180px" }}>
+                  <PhoneCodeCombobox
+                    label="Phone code"
+                    countries={countries}
+                    value={editPhoneCode}
+                    onChange={setEditPhoneCode}
+                  />
+                </div>
+                <div style={{ flex: 1 }}>
+                  <TextField
+                    label="Phone"
+                    value={editPhone}
+                    onChange={setEditPhone}
+                    autoComplete="tel"
+                    error={phoneError ?? undefined}
+                  />
+                </div>
               </InlineStack>
             </BlockStack>
           </Modal.Section>
