@@ -85,6 +85,11 @@ export function PhoneCodeCombobox({
               {o.flag} {o.dial} — {o.countryName}
             </Listbox.Option>
           ))}
+          {filtered.length > 50 && (
+            <Listbox.Action value="__more__" disabled>
+              {`Refine search (${filtered.length - 50} more...)`}
+            </Listbox.Action>
+          )}
         </Listbox>
       ) : null}
     </Combobox>

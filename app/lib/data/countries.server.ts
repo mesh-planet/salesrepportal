@@ -21,6 +21,10 @@ function codeToFlag(code: string): string {
   return String.fromCodePoint(A + code.charCodeAt(0) - a, A + code.charCodeAt(1) - a);
 }
 
+// Countries floated to the top of the list (in this order) since the business
+// operates primarily in these regions. Everything else follows alphabetically.
+const PRIORITY_COUNTRIES = ["US", "CA", "GB", "AU", "MX"];
+
 let cachedCountries: CountryOption[] | null = null;
 
 export function getAllCountries(): CountryOption[] {
@@ -36,7 +40,18 @@ export function getAllCountries(): CountryOption[] {
       flag: codeToFlag(code),
     });
   }
-  list.sort((a, b) => a.name.localeCompare(b.name));
+  list.sort((a, b) => {
+    const aPriority = PRIORITY_COUNTRIES.indexOf(a.code);
+    const bPriority = PRIORITY_COUNTRIES.indexOf(b.code);
+    if (aPriority !== -1 || bPriority !== -1) {
+      // At least one is a priority country: priority countries come first,
+      // ordered by their position in PRIORITY_COUNTRIES.
+      if (aPriority === -1) return 1;
+      if (bPriority === -1) return -1;
+      return aPriority - bPriority;
+    }
+    return a.name.localeCompare(b.name);
+  });
   cachedCountries = list;
   return list;
 }
