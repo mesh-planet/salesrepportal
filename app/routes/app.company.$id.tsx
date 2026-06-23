@@ -39,6 +39,7 @@ import { FloatingCartButton } from "../components/FloatingCartButton";
 import { CountryCombobox } from "../components/CountryCombobox";
 import { ZoneCombobox } from "../components/ZoneCombobox";
 import { PhoneCodeCombobox } from "../components/PhoneCodeCombobox";
+import { toE164 } from "../lib/utils/phone";
 import { useCartContext } from "../components/CartProvider";
 import { getAllCountries } from "../lib/data/countries.server";
 import { sendAddressChangeSlackNotification } from "../lib/slack.server";
@@ -323,7 +324,7 @@ export default function CompanyCatalog() {
     setAddressConfirmOpen(false);
   }, []);
 
-  const fullPhone = editPhone ? `${editPhoneCode} ${editPhone}`.trim() : "";
+  const fullPhone = toE164(editPhoneCode, editPhone);
 
   const diff = useMemo(() => {
     const fields: Array<{ label: string; before: string; after: string }> = [

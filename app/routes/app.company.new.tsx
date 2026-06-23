@@ -33,6 +33,7 @@ import { assignCatalogToNewLocation } from "../lib/graphql/catalogs";
 import { invalidatePattern } from "../lib/cache.server";
 import prisma from "../db.server";
 import { getAllCountries } from "../lib/data/countries.server";
+import { toE164 } from "../lib/utils/phone";
 import { CountryCombobox } from "../components/CountryCombobox";
 import { ZoneCombobox } from "../components/ZoneCombobox";
 import { PhoneCodeCombobox } from "../components/PhoneCodeCombobox";
@@ -300,7 +301,7 @@ export default function NewCompany() {
     formData.set("contactEmail", contactEmail);
     formData.set("contactFirstName", contactFirstName);
     formData.set("contactLastName", contactLastName);
-    formData.set("contactPhone", contactPhone ? `${contactPhoneCode}${contactPhone}` : "");
+    formData.set("contactPhone", toE164(contactPhoneCode, contactPhone));
     formData.set("existingCustomerId", existingCustomerId ?? "");
     formData.set("companyName", companyName);
     formData.set("externalId", externalId);
@@ -313,7 +314,7 @@ export default function NewCompany() {
     formData.set("city", city);
     formData.set("zoneCode", zoneCode);
     formData.set("zip", zip);
-    formData.set("addrPhone", addrPhone ? `${addrPhoneCode}${addrPhone}` : "");
+    formData.set("addrPhone", toE164(addrPhoneCode, addrPhone));
     formData.set("paymentTermsTemplateId", paymentTermsTemplateId);
     formData.set("taxExempt", String(taxExempt));
     formData.set("taxRegistrationId", taxRegistrationId);
