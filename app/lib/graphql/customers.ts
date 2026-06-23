@@ -1,25 +1,26 @@
 import type { CustomerSearchResult } from "../../types";
 
-const CUSTOMER_SEARCH_QUERY = `#graphql
-  query CustomerSearch($query: String!) {
-    customers(first: 1, query: $query) {
-      nodes {
-        id
-        firstName
-        lastName
-        email
-        phone
-        numberOfOrders
-      }
+// Direct lookup by email via customerByIdentifier. Unlike the customers(query:)
+// search index, this is NOT eventually-consistent — it reliably finds a
+// customer the instant they exist, including ones created seconds ago. The old
+// indexed search missed recently-created customers, so the form reported "new
+// email" while customerCreate then rejected it as "already taken".
+const CUSTOMER_BY_EMAIL_QUERY = `#graphql
+  query CustomerByEmail($identifier: CustomerIdentifierInput!) {
+    customerByIdentifier(identifier: $identifier) {
+      id
+      firstName
+      lastName
+      email
+      phone
+      numberOfOrders
     }
   }
 `;
 
-interface CustomerSearchResponse {
+interface CustomerByEmailResponse {
   data?: {
-    customers: {
-      nodes: CustomerSearchResult[];
-    };
+    customerByIdentifier: CustomerSearchResult | null;
   };
   errors?: Array<{ message: string }>;
 }
@@ -28,18 +29,17 @@ export async function searchCustomerByEmail(
   admin: { graphql: Function },
   email: string,
 ): Promise<CustomerSearchResult | null> {
-  const response = await admin.graphql(CUSTOMER_SEARCH_QUERY, {
-    variables: { query: `email:"${email}"` },
+  const response = await admin.graphql(CUSTOMER_BY_EMAIL_QUERY, {
+    variables: { identifier: { emailAddress: email } },
   });
-  const json: CustomerSearchResponse = await response.json();
+  const json: CustomerByEmailResponse = await response.json();
 
   if (json.errors?.length) {
-    console.error("[Customers] Search error:", json.errors);
-    throw new Error(`Customer search failed: ${json.errors[0].message}`);
+    console.error("[Customers] Lookup error:", json.errors);
+    throw new Error(`Customer lookup failed: ${json.errors[0].message}`);
   }
 
-  const customers = json.data?.customers?.nodes ?? [];
-  return customers.length > 0 ? customers[0] : null;
+  return json.data?.customerByIdentifier ?? null;
 }
 
 const CUSTOMER_CREATE_MUTATION = `#graphql
@@ -99,6 +99,18 @@ export async function createCustomer(
 
   const result = json.data?.customerCreate;
   if (result?.userErrors?.length) {
+    // If the email is already in use, the customer already exists — look them
+    // up directly and reuse them instead of hard-failing. Guards against a
+    // prior partial attempt (or search-index lag) leaving the customer created.
+    const emailTaken = result.userErrors.some((e) =>
+      /taken|already|in use|exists/i.test(e.message),
+    );
+    if (emailTaken) {
+      const existing = await searchCustomerByEmail(admin, input.email);
+      if (existing?.id) {
+        return { customerId: existing.id, errors: [] };
+      }
+    }
     return {
       customerId: null,
       errors: result.userErrors.map((e) => e.message),
