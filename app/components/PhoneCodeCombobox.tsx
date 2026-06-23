@@ -1,4 +1,4 @@
-import { useState, useMemo, useCallback, useEffect } from "react";
+import { useState, useMemo, useCallback } from "react";
 import { Combobox, Listbox } from "@shopify/polaris";
 import type { CountryOption } from "../lib/data/countries";
 
@@ -22,54 +22,69 @@ export function PhoneCodeCombobox({
       .filter((c) => c.dial)
       .map((c) => ({
         key: `${c.code}-${c.dial}`,
+        code: c.code,
         dial: c.dial,
         flag: c.flag,
         countryName: c.name,
       }));
   }, [countries]);
 
-  const initialDisplay = useMemo(() => {
-    if (!value) return "";
-    const first = dialOptions.find((o) => o.dial === value);
-    return first ? `${first.flag} ${first.dial}` : value;
-  }, [value, dialOptions]);
+  // The currently selected dial code (first match wins — e.g. +1 → US, which
+  // sorts ahead of Canada via the priority order in getAllCountries()).
+  const selected = useMemo(
+    () => dialOptions.find((o) => o.dial === value) ?? null,
+    [dialOptions, value],
+  );
 
-  const [inputValue, setInputValue] = useState(initialDisplay);
-
-  useEffect(() => {
-    setInputValue(initialDisplay);
-  }, [initialDisplay]);
+  // Search query the user types. The field is a live search box while focused
+  // and shows the current selection when blurred — so you never have to delete
+  // the "🇺🇸 +1" text just to look up another country.
+  const [query, setQuery] = useState("");
+  const [focused, setFocused] = useState(false);
 
   const filtered = useMemo(() => {
-    if (!inputValue || inputValue === initialDisplay) return dialOptions;
-    const lower = inputValue.toLowerCase().replace(/^\+/, "");
+    const q = query.trim().toLowerCase().replace(/^\+/, "");
+    if (!q) return dialOptions;
     return dialOptions.filter(
       (o) =>
-        o.dial.replace(/^\+/, "").startsWith(lower) ||
-        o.countryName.toLowerCase().includes(lower) ||
-        o.flag.includes(inputValue)
+        o.countryName.toLowerCase().includes(q) ||
+        o.dial.replace(/^\+/, "").startsWith(q) ||
+        o.code.toLowerCase() === q,
     );
-  }, [dialOptions, inputValue, initialDisplay]);
+  }, [dialOptions, query]);
 
   const handleSelect = useCallback(
     (selectedKey: string) => {
       const match = dialOptions.find((o) => o.key === selectedKey);
       if (!match) return;
       onChange(match.dial);
-      setInputValue(`${match.flag} ${match.dial}`);
+      setQuery("");
+      setFocused(false);
     },
-    [dialOptions, onChange]
+    [dialOptions, onChange],
   );
+
+  const selectionLabel = selected
+    ? `${selected.dial} ${selected.countryName}`
+    : "";
 
   return (
     <Combobox
       activator={
         <Combobox.TextField
           label={label}
-          value={inputValue}
-          onChange={setInputValue}
+          // While focused the field shows what you type; otherwise it shows the
+          // current selection.
+          value={focused ? query : selectionLabel}
+          onChange={setQuery}
+          onFocus={() => {
+            setFocused(true);
+            setQuery("");
+          }}
+          onBlur={() => setFocused(false)}
           autoComplete="off"
-          placeholder="+1"
+          placeholder={selectionLabel || "Search country or code"}
+          prefix={selected?.flag ?? ""}
           disabled={disabled}
         />
       }
@@ -87,11 +102,17 @@ export function PhoneCodeCombobox({
           ))}
           {filtered.length > 50 && (
             <Listbox.Action value="__more__" disabled>
-              {`Refine search (${filtered.length - 50} more...)`}
+              {`Keep typing to narrow (${filtered.length - 50} more...)`}
             </Listbox.Action>
           )}
         </Listbox>
-      ) : null}
+      ) : (
+        <Listbox>
+          <Listbox.Option value="__no_match__" disabled>
+            No matching country
+          </Listbox.Option>
+        </Listbox>
+      )}
     </Combobox>
   );
 }
