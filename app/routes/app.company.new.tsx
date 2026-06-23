@@ -116,7 +116,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
     // For an EXISTING customer we omit `companyContact` entirely (its email is
     // already taken, so companyCreate would reject it) and link them to the new
     // company afterwards with companyAssignCustomerAsContact.
-    const companyResult = await createCompany(admin, {
+    const buildCompanyInput = (includePhones: boolean) => ({
       company: {
         name: companyName,
         externalId: externalId || undefined,
@@ -130,7 +130,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
           countryCode,
           firstName: addrFirstName || undefined,
           lastName: addrLastName || undefined,
-          phone: addrPhone || undefined,
+          phone: includePhones ? addrPhone || undefined : undefined,
           zip: zip || undefined,
           zoneCode: zoneCode || undefined,
         },
@@ -147,9 +147,26 @@ export const action = async ({ request }: ActionFunctionArgs) => {
             email: contactEmail,
             firstName: contactFirstName || undefined,
             lastName: contactLastName || undefined,
-            phone: contactPhone || undefined,
+            phone: includePhones ? contactPhone || undefined : undefined,
           },
     });
+
+    let companyResult = await createCompany(admin, buildCompanyInput(true));
+
+    // A phone number is optional. If Shopify rejects ONLY because the phone is
+    // invalid (e.g. the dial code doesn't match the number's country), retry
+    // without the phone so the rep isn't blocked, and flag it so we can warn
+    // them to fix the number later.
+    let phoneSkipped = false;
+    const hadPhone = Boolean(addrPhone || contactPhone);
+    if (
+      companyResult.errors.length > 0 &&
+      hadPhone &&
+      companyResult.errors.every((e) => /phone/i.test(e))
+    ) {
+      companyResult = await createCompany(admin, buildCompanyInput(false));
+      phoneSkipped = companyResult.errors.length === 0;
+    }
 
     if (companyResult.errors.length > 0) {
       return json({
@@ -219,6 +236,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
       errors: [],
       companyLocationId: newLocationId,
       companyName: newCompany?.name,
+      phoneSkipped,
     });
   }
 
@@ -293,7 +311,11 @@ export default function NewCompany() {
   useEffect(() => {
     const data = fetcher.data as Record<string, unknown> | undefined;
     if (data?.intent === "create-company" && data?.success) {
-      shopify.toast.show("Company created successfully!");
+      shopify.toast.show(
+        data.phoneSkipped
+          ? "Company created, but the phone number was invalid and was not saved. You can add it later."
+          : "Company created successfully!",
+      );
       const locId = data.companyLocationId as string;
       const numericId = locId.replace("gid://shopify/CompanyLocation/", "");
       navigate(`/app/company/${numericId}`);
@@ -561,6 +583,11 @@ export default function NewCompany() {
                     onChange={(v) => {
                       setCountryCode(v);
                       setZoneCode("");
+                      // Keep the phone dial code in sync with the country so we
+                      // don't build e.g. "+1<non-US number>", which Shopify
+                      // rejects as an invalid phone.
+                      const dial = countries.find((c) => c.code === v)?.dial;
+                      if (dial) setAddrPhoneCode(dial);
                     }}
                     requiredIndicator
                   />
