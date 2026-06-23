@@ -24,9 +24,10 @@ import {
 import { TitleBar, useAppBridge } from "@shopify/app-bridge-react";
 
 import { requireAuth } from "../lib/auth.server";
-import { searchCustomerByEmail, createCustomer } from "../lib/graphql/customers";
+import { searchCustomerByEmail } from "../lib/graphql/customers";
 import {
   createCompany,
+  assignCustomerAsContact,
   fetchPaymentTermsTemplates,
 } from "../lib/graphql/companies";
 import { assignCatalogToNewLocation } from "../lib/graphql/catalogs";
@@ -104,25 +105,17 @@ export const action = async ({ request }: ActionFunctionArgs) => {
       return json({ intent, success: false, errors, companyLocationId: null });
     }
 
-    // Step 1: Create customer if needed
-    if (!existingCustomerId) {
-      const customerResult = await createCustomer(admin, {
-        email: contactEmail,
-        firstName: contactFirstName || undefined,
-        lastName: contactLastName || undefined,
-        phone: contactPhone || undefined,
-      });
-      if (customerResult.errors.length > 0) {
-        return json({
-          intent,
-          success: false,
-          errors: customerResult.errors,
-          companyLocationId: null,
-        });
-      }
-    }
-
-    // Step 2: Create company with location and contact
+    // Create the company together with its location and contact.
+    //
+    // For a BRAND-NEW customer we let companyCreate create the customer +
+    // contact in one shot via `companyContact`. We must NOT pre-create the
+    // customer separately — companyContact also creates a customer from the
+    // email, so doing both would fail with "Email address has already been
+    // taken".
+    //
+    // For an EXISTING customer we omit `companyContact` entirely (its email is
+    // already taken, so companyCreate would reject it) and link them to the new
+    // company afterwards with companyAssignCustomerAsContact.
     const companyResult = await createCompany(admin, {
       company: {
         name: companyName,
@@ -148,12 +141,14 @@ export const action = async ({ request }: ActionFunctionArgs) => {
         taxExempt,
         taxRegistrationId: taxRegistrationId || undefined,
       },
-      companyContact: {
-        email: contactEmail,
-        firstName: contactFirstName || undefined,
-        lastName: contactLastName || undefined,
-        phone: contactPhone || undefined,
-      },
+      companyContact: existingCustomerId
+        ? undefined
+        : {
+            email: contactEmail,
+            firstName: contactFirstName || undefined,
+            lastName: contactLastName || undefined,
+            phone: contactPhone || undefined,
+          },
     });
 
     if (companyResult.errors.length > 0) {
@@ -175,6 +170,23 @@ export const action = async ({ request }: ActionFunctionArgs) => {
         errors: ["Company created but no location was returned"],
         companyLocationId: null,
       });
+    }
+
+    // Link the existing customer to the new company as a contact.
+    if (existingCustomerId && newCompany?.id) {
+      const assignResult = await assignCustomerAsContact(
+        admin,
+        newCompany.id,
+        existingCustomerId,
+      );
+      if (assignResult.errors.length > 0) {
+        return json({
+          intent,
+          success: false,
+          errors: assignResult.errors,
+          companyLocationId: null,
+        });
+      }
     }
 
     // Step 3: Assign catalog based on country

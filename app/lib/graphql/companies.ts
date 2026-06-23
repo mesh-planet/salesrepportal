@@ -454,6 +454,59 @@ export async function createCompany(
   return { company: result.company, errors: [] };
 }
 
+const COMPANY_ASSIGN_CONTACT_MUTATION = `#graphql
+  mutation CompanyAssignCustomerAsContact($companyId: ID!, $customerId: ID!) {
+    companyAssignCustomerAsContact(companyId: $companyId, customerId: $customerId) {
+      companyContact {
+        id
+      }
+      userErrors {
+        field
+        message
+      }
+    }
+  }
+`;
+
+interface CompanyAssignContactResponse {
+  data?: {
+    companyAssignCustomerAsContact: {
+      companyContact: { id: string } | null;
+      userErrors: Array<{ field: string[] | null; message: string }>;
+    };
+  };
+  errors?: Array<{ message: string }>;
+}
+
+/**
+ * Link an EXISTING customer to a company as a contact. Use this instead of
+ * companyCreate's `companyContact` field for customers that already exist —
+ * companyContact always creates a NEW customer and rejects an email that is
+ * already taken.
+ */
+export async function assignCustomerAsContact(
+  admin: { graphql: Function },
+  companyId: string,
+  customerId: string,
+): Promise<{ companyContactId: string | null; errors: string[] }> {
+  const response = await admin.graphql(COMPANY_ASSIGN_CONTACT_MUTATION, {
+    variables: { companyId, customerId },
+  });
+  const json: CompanyAssignContactResponse = await response.json();
+
+  if (json.errors?.length) {
+    console.error("[Companies] Assign contact error:", json.errors);
+    return { companyContactId: null, errors: json.errors.map((e) => e.message) };
+  }
+
+  const result = json.data?.companyAssignCustomerAsContact;
+  if (result?.userErrors?.length) {
+    return { companyContactId: null, errors: result.userErrors.map((e) => e.message) };
+  }
+
+  return { companyContactId: result?.companyContact?.id ?? null, errors: [] };
+}
+
 export async function fetchPaymentTermsTemplates(
   admin: { graphql: Function },
 ): Promise<PaymentTermsTemplate[]> {
